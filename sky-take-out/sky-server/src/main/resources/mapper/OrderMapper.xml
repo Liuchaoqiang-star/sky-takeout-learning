@@ -26,6 +26,12 @@
             <if test="checkoutTime != null">
                 checkout_time = #{checkoutTime},
             </if>
+            <if test="cancelReason != null and cancelReason != ''">
+                cancel_reason = #{cancelReason},
+            </if>
+            <if test="cancelTime != null">
+                cancel_time = #{cancelTime},
+            </if>
         </set>
         where id = #{id}
     </update>

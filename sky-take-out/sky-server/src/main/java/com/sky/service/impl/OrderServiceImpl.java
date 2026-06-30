@@ -225,6 +225,41 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
+     * 用户取消订单
+     */
+    @Override
+    public void userCancelById(Long id) throws Exception {
+        Orders ordersDB = orderMapper.getById(id);
+        if (ordersDB == null || !ordersDB.getUserId().equals(BaseContext.getCurrentId())) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+
+        // 用户端只允许取消待付款、待接单订单；已接单/派送中要联系商家处理
+        if (ordersDB.getStatus() > Orders.TO_BE_CONFIRMED) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+
+        Orders orders = new Orders();
+        orders.setId(ordersDB.getId());
+
+        // 待接单说明已经支付成功了，取消时需要走微信退款
+        if (ordersDB.getStatus().equals(Orders.TO_BE_CONFIRMED)) {
+            weChatPayUtil.refund(
+                    ordersDB.getNumber(),
+                    ordersDB.getNumber(),
+                    ordersDB.getAmount(),
+                    ordersDB.getAmount()
+            );
+            orders.setPayStatus(Orders.REFUND);
+        }
+
+        orders.setStatus(Orders.CANCELLED);
+        orders.setCancelReason("用户取消");
+        orders.setCancelTime(LocalDateTime.now());
+        orderMapper.update(orders);
+    }
+
+    /**
      * 把省市区和详细地址拼成订单快照，后面用户修改地址也不会影响历史订单
      */
     private String buildFullAddress(AddressBook addressBook) {
