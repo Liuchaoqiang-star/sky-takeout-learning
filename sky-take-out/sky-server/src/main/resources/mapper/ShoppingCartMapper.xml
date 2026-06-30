@@ -21,4 +21,14 @@
         </where>
     </select>
 
+    <insert id="insertBatch">
+        insert into shopping_cart
+        (name, user_id, dish_id, setmeal_id, dish_flavor, number, amount, image, create_time)
+        values
+        <foreach collection="shoppingCartList" item="cart" separator=",">
+            (#{cart.name}, #{cart.userId}, #{cart.dishId}, #{cart.setmealId}, #{cart.dishFlavor},
+             #{cart.number}, #{cart.amount}, #{cart.image}, #{cart.createTime})
+        </foreach>
+    </insert>
+
 </mapper>
