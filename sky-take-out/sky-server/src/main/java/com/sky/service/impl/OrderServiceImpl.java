@@ -424,6 +424,29 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
+     * 完成订单。
+     * 只有“派送中”的订单才能完成，完成时记录实际送达时间。
+     */
+    @Override
+    public void complete(Long id) {
+        Orders ordersDB = orderMapper.getById(id);
+        if (ordersDB == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+
+        // 订单必须已经进入派送中，才能被标记为已完成
+        if (!ordersDB.getStatus().equals(Orders.DELIVERY_IN_PROGRESS)) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+
+        Orders orders = new Orders();
+        orders.setId(ordersDB.getId());
+        orders.setStatus(Orders.COMPLETED);
+        orders.setDeliveryTime(LocalDateTime.now());
+        orderMapper.update(orders);
+    }
+
+    /**
      * 把省市区和详细地址拼成订单快照，后面用户修改地址也不会影响历史订单
      */
     private String buildFullAddress(AddressBook addressBook) {
