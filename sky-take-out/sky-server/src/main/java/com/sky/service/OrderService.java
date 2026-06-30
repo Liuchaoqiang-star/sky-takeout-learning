@@ -66,4 +66,9 @@ public interface OrderService {
      * 接单
      */
     void confirm(OrdersConfirmDTO ordersConfirmDTO);
+
+    /**
+     * 派送订单
+     */
+    void delivery(Long id);
 }

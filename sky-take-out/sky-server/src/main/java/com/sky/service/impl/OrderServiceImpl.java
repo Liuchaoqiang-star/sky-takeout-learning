@@ -402,6 +402,28 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
+     * 派送订单。
+     * 只有“已接单/待派送”的订单才能开始派送，状态从3变成4。
+     */
+    @Override
+    public void delivery(Long id) {
+        Orders ordersDB = orderMapper.getById(id);
+        if (ordersDB == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+
+        // 订单必须先被商家接单，才能进入派送中
+        if (!ordersDB.getStatus().equals(Orders.CONFIRMED)) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+
+        Orders orders = new Orders();
+        orders.setId(ordersDB.getId());
+        orders.setStatus(Orders.DELIVERY_IN_PROGRESS);
+        orderMapper.update(orders);
+    }
+
+    /**
      * 把省市区和详细地址拼成订单快照，后面用户修改地址也不会影响历史订单
      */
     private String buildFullAddress(AddressBook addressBook) {
