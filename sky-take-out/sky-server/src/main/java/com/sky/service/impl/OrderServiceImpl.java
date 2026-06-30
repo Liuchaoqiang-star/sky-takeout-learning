@@ -8,6 +8,7 @@ import com.sky.context.BaseContext;
 import com.sky.dto.OrdersConfirmDTO;
 import com.sky.dto.OrdersPageQueryDTO;
 import com.sky.dto.OrdersPaymentDTO;
+import com.sky.dto.OrdersRejectionDTO;
 import com.sky.dto.OrdersSubmitDTO;
 import com.sky.entity.AddressBook;
 import com.sky.entity.OrderDetail;
@@ -443,6 +444,42 @@ public class OrderServiceImpl implements OrderService {
         orders.setId(ordersDB.getId());
         orders.setStatus(Orders.COMPLETED);
         orders.setDeliveryTime(LocalDateTime.now());
+        orderMapper.update(orders);
+    }
+
+    /**
+     * 拒单。
+     * 只有“待接单”的订单才能拒单；如果用户已经支付，需要先发起退款，再把订单改成已取消。
+     */
+    @Override
+    public void rejection(OrdersRejectionDTO ordersRejectionDTO) throws Exception {
+        Orders ordersDB = orderMapper.getById(ordersRejectionDTO.getId());
+        if (ordersDB == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+
+        // 拒单只能发生在商家还没接单之前，不能拒绝已接单、派送中、已完成的订单
+        if (!ordersDB.getStatus().equals(Orders.TO_BE_CONFIRMED)) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+
+        Orders orders = new Orders();
+        orders.setId(ordersDB.getId());
+
+        // 待接单订单通常已经支付，已支付的订单拒单时要原路退款
+        if (Orders.PAID.equals(ordersDB.getPayStatus())) {
+            weChatPayUtil.refund(
+                    ordersDB.getNumber(),
+                    ordersDB.getNumber(),
+                    ordersDB.getAmount(),
+                    ordersDB.getAmount()
+            );
+            orders.setPayStatus(Orders.REFUND);
+        }
+
+        orders.setStatus(Orders.CANCELLED);
+        orders.setRejectionReason(ordersRejectionDTO.getRejectionReason());
+        orders.setCancelTime(LocalDateTime.now());
         orderMapper.update(orders);
     }
 
