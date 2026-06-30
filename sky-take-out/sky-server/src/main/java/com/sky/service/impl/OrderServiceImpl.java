@@ -25,6 +25,7 @@ import com.sky.result.PageResult;
 import com.sky.service.OrderService;
 import com.sky.utils.WeChatPayUtil;
 import com.sky.vo.OrderPaymentVO;
+import com.sky.vo.OrderStatisticsVO;
 import com.sky.vo.OrderSubmitVO;
 import com.sky.vo.OrderVO;
 import lombok.extern.slf4j.Slf4j;
@@ -333,6 +334,26 @@ public class OrderServiceImpl implements OrderService {
         ).collect(Collectors.toList());
 
         return String.join("", orderDishList);
+    }
+
+    /**
+     * 各个状态的订单数量统计。
+     * 只统计orders主表的状态，不需要查订单明细表。
+     */
+    @Override
+    public OrderStatisticsVO statistics() {
+        // 待接单：用户已支付，等待商家处理
+        Integer toBeConfirmed = orderMapper.countStatus(Orders.TO_BE_CONFIRMED);
+        // 待派送：商家已接单，等待配送
+        Integer confirmed = orderMapper.countStatus(Orders.CONFIRMED);
+        // 派送中：订单已经开始配送
+        Integer deliveryInProgress = orderMapper.countStatus(Orders.DELIVERY_IN_PROGRESS);
+
+        OrderStatisticsVO orderStatisticsVO = new OrderStatisticsVO();
+        orderStatisticsVO.setToBeConfirmed(toBeConfirmed);
+        orderStatisticsVO.setConfirmed(confirmed);
+        orderStatisticsVO.setDeliveryInProgress(deliveryInProgress);
+        return orderStatisticsVO;
     }
 
     /**
