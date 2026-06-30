@@ -357,6 +357,28 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
+     * 管理端查询订单详情。
+     * 和用户端详情一样都要查主表和明细表，但管理端可以查看所有用户订单，不做userId校验。
+     */
+    @Override
+    public OrderVO adminDetails(Long id) {
+        Orders orders = orderMapper.getById(id);
+        if (orders == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+
+        // 订单详情页需要展示这一单买了哪些菜/套餐
+        List<OrderDetail> orderDetailList = orderDetailMapper.getByOrderId(id);
+
+        OrderVO orderVO = new OrderVO();
+        // 先把订单主表字段复制到VO，比如订单号、状态、金额、地址等
+        BeanUtils.copyProperties(orders, orderVO);
+        // 再把明细列表放进去，这样前端既能看到订单整体，也能看到商品明细
+        orderVO.setOrderDetailList(orderDetailList);
+        return orderVO;
+    }
+
+    /**
      * 把省市区和详细地址拼成订单快照，后面用户修改地址也不会影响历史订单
      */
     private String buildFullAddress(AddressBook addressBook) {

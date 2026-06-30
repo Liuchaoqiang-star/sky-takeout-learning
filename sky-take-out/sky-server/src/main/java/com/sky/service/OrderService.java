@@ -55,4 +55,9 @@ public interface OrderService {
      * 各个状态的订单数量统计
      */
     OrderStatisticsVO statistics();
+
+    /**
+     * 管理端查询订单详情
+     */
+    OrderVO adminDetails(Long id);
 }
