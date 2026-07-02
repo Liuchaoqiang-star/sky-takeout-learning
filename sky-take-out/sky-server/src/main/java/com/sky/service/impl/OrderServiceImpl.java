@@ -1,10 +1,13 @@
 package com.sky.service.impl;
 
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.sky.constant.MessageConstant;
 import com.sky.context.BaseContext;
+import com.sky.dto.OrdersCancelDTO;
 import com.sky.dto.OrdersConfirmDTO;
 import com.sky.dto.OrdersPageQueryDTO;
 import com.sky.dto.OrdersPaymentDTO;
@@ -25,6 +28,7 @@ import com.sky.mapper.ShoppingCartMapper;
 import com.sky.mapper.UserMapper;
 import com.sky.result.PageResult;
 import com.sky.service.OrderService;
+import com.sky.utils.HttpClientUtil;
 import com.sky.utils.WeChatPayUtil;
 import com.sky.vo.OrderPaymentVO;
 import com.sky.vo.OrderStatisticsVO;
@@ -33,12 +37,15 @@ import com.sky.vo.OrderVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -63,6 +70,12 @@ public class OrderServiceImpl implements OrderService {
     @Autowired
     private WeChatPayUtil weChatPayUtil;
 
+    @Value("${sky.shop.address:}")
+    private String shopAddress;
+
+    @Value("${sky.baidu.ak:}")
+    private String baiduAk;
+
     /**
      * 用户下单
      */
@@ -76,6 +89,10 @@ public class OrderServiceImpl implements OrderService {
         if (addressBook == null) {
             throw new AddressBookBusinessException(MessageConstant.ADDRESS_BOOK_IS_NULL);
         }
+        String fullAddress = buildFullAddress(addressBook);
+
+        // 下单前先校验配送范围，超过5公里就不再创建订单
+        checkOutOfRange(fullAddress);
 
         // 2. 查询当前登录用户的购物车，下单商品以后端购物车为准
         ShoppingCart shoppingCart = ShoppingCart.builder()
@@ -97,7 +114,7 @@ public class OrderServiceImpl implements OrderService {
         orders.setPayStatus(Orders.UN_PAID);
         orders.setPhone(addressBook.getPhone());
         orders.setConsignee(addressBook.getConsignee());
-        orders.setAddress(buildFullAddress(addressBook));
+        orders.setAddress(fullAddress);
 
         // 4. 插入订单主表，useGeneratedKeys会把数据库生成的id回填到orders.id
         orderMapper.insert(orders);
@@ -481,6 +498,109 @@ public class OrderServiceImpl implements OrderService {
         orders.setRejectionReason(ordersRejectionDTO.getRejectionReason());
         orders.setCancelTime(LocalDateTime.now());
         orderMapper.update(orders);
+    }
+
+    /**
+     * 商家取消订单。
+     * 管理端取消时要保存取消原因；如果用户已经付款，需要先退款再修改订单支付状态。
+     */
+    @Override
+    public void cancel(OrdersCancelDTO ordersCancelDTO) throws Exception {
+        Orders ordersDB = orderMapper.getById(ordersCancelDTO.getId());
+        if (ordersDB == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+
+        // 已完成、已取消的订单不能再取消，避免重复取消或破坏历史订单
+        if (ordersDB.getStatus().equals(Orders.COMPLETED) || ordersDB.getStatus().equals(Orders.CANCELLED)) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+
+        Orders orders = new Orders();
+        orders.setId(ordersDB.getId());
+
+        // 已支付订单取消时要退款；未支付订单只需要改订单状态
+        if (Orders.PAID.equals(ordersDB.getPayStatus())) {
+            String refundResult = weChatPayUtil.refund(
+                    ordersDB.getNumber(),
+                    ordersDB.getNumber(),
+                    ordersDB.getAmount(),
+                    ordersDB.getAmount()
+            );
+            log.info("商家取消订单，申请退款结果：{}", refundResult);
+            orders.setPayStatus(Orders.REFUND);
+        }
+
+        orders.setStatus(Orders.CANCELLED);
+        orders.setCancelReason(ordersCancelDTO.getCancelReason());
+        orders.setCancelTime(LocalDateTime.now());
+        orderMapper.update(orders);
+    }
+
+    /**
+     * 检查客户收货地址是否超出配送范围。
+     * 思路：店铺地址和用户地址先分别转成经纬度，再用百度路线规划算两点距离。
+     */
+    private void checkOutOfRange(String address) {
+        if (isBlank(shopAddress) || isBlank(baiduAk)) {
+            log.warn("未配置店铺地址或百度地图AK，跳过配送范围校验");
+            return;
+        }
+
+        String shopLngLat = getLngLat(shopAddress, "店铺地址解析失败");
+        String userLngLat = getLngLat(address, "收货地址解析失败");
+
+        Map<String, String> map = new HashMap<>();
+        map.put("origin", shopLngLat);
+        map.put("destination", userLngLat);
+        map.put("steps_info", "0");
+        map.put("ak", baiduAk);
+
+        String json = HttpClientUtil.doGet("https://api.map.baidu.com/directionlite/v1/driving", map);
+        JSONObject jsonObject = JSON.parseObject(json);
+        if (jsonObject == null || !"0".equals(jsonObject.getString("status"))) {
+            throw new OrderBusinessException("配送路线规划失败");
+        }
+
+        JSONArray routes = jsonObject.getJSONObject("result").getJSONArray("routes");
+        if (routes == null || routes.isEmpty()) {
+            throw new OrderBusinessException("配送路线规划失败");
+        }
+
+        Integer distance = routes.getJSONObject(0).getInteger("distance");
+        if (distance == null) {
+            throw new OrderBusinessException("配送路线规划失败");
+        }
+
+        // 百度返回的距离单位是米，超过5000米就是超出配送范围
+        if (distance > 5000) {
+            throw new OrderBusinessException("超出配送范围");
+        }
+    }
+
+    /**
+     * 把普通地址解析成经纬度，返回格式按百度路线规划要求拼成“纬度,经度”。
+     */
+    private String getLngLat(String address, String errorMessage) {
+        Map<String, String> map = new HashMap<>();
+        map.put("address", address);
+        map.put("output", "json");
+        map.put("ak", baiduAk);
+
+        String json = HttpClientUtil.doGet("https://api.map.baidu.com/geocoding/v3", map);
+        JSONObject jsonObject = JSON.parseObject(json);
+        if (jsonObject == null || !"0".equals(jsonObject.getString("status"))) {
+            throw new OrderBusinessException(errorMessage);
+        }
+
+        JSONObject location = jsonObject.getJSONObject("result").getJSONObject("location");
+        String lat = location.getString("lat");
+        String lng = location.getString("lng");
+        return lat + "," + lng;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     /**

@@ -60,3 +60,9 @@ sky:
   wechat:
     appid: ${sky.wechat.appid}
     secret: ${sky.wechat.secret}
+  shop:
+    # 店铺地址，用于下单时计算用户收货地址是否超出配送范围
+    address: 北京市朝阳区新街大院一号楼8层
+  baidu:
+    # 百度地图开放平台AK，配置后才会真正进行配送距离校验
+    ak:
